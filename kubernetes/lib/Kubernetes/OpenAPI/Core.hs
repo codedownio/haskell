@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleInstances #-}
 {-
    Kubernetes
 
@@ -27,8 +28,8 @@ Module : Kubernetes.OpenAPI.Core
 
 module Kubernetes.OpenAPI.Core where
 
-import Kubernetes.OpenAPI.MimeTypes
 import Kubernetes.OpenAPI.Logging
+import Kubernetes.OpenAPI.MimeTypes
 
 import qualified Control.Arrow as P (left)
 import qualified Control.DeepSeq as NF
@@ -49,27 +50,31 @@ import qualified Data.Proxy as P (Proxy(..))
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Time as TI
+import qualified Data.Time.Format.Internal as TI
 import qualified Data.Time.ISO8601 as TI
 import qualified GHC.Base as P (Alternative)
 import qualified Lens.Micro as L
 import qualified Network.HTTP.Client.MultipartFormData as NH
 import qualified Network.HTTP.Types as NH
 import qualified Prelude as P
+import qualified Text.Printf as T
 import qualified Web.FormUrlEncoded as WH
 import qualified Web.HttpApiData as WH
-import qualified Text.Printf as T
 
 import Control.Applicative ((<|>))
 import Control.Applicative (Alternative)
-import Data.Function ((&))
 import Data.Foldable(foldlM)
+import Data.Function ((&))
 import Data.Monoid ((<>))
 import Data.Text (Text)
 import Prelude (($), (.), (<$>), (<*>), Maybe(..), Bool(..), Char, String, fmap, mempty, pure, return, show, IO, Monad, Functor)
 
+instance P.MonadFail (P.Either String) where
+  fail s = P.Left s
+
 -- * KubernetesClientConfig
 
--- | 
+-- |
 data KubernetesClientConfig = KubernetesClientConfig
   { configHost  :: BCL.ByteString -- ^ host supplied in the Request
   , configUserAgent :: Text -- ^ user-agent supplied in the Request
@@ -107,7 +112,7 @@ newConfig = do
         , configLogContext = logCxt
         , configAuthMethods = []
         , configValidateAuthMethods = True
-        }  
+        }
 
 -- | updates config use AuthMethod on matching requests
 addAuthMethod :: AuthMethod auth => KubernetesClientConfig -> auth -> KubernetesClientConfig
@@ -129,7 +134,7 @@ withStderrLogging p = do
 -- | updates the config to disable logging
 withNoLogging :: KubernetesClientConfig -> KubernetesClientConfig
 withNoLogging p = p { configLogExecWithContext =  runNullLogExec}
- 
+
 -- * KubernetesRequest
 
 -- | Represents a request.
@@ -228,7 +233,7 @@ data ParamBody
 
 -- ** KubernetesRequest Utils
 
-_mkRequest :: NH.Method -- ^ Method 
+_mkRequest :: NH.Method -- ^ Method
           -> [BCL.ByteString] -- ^ Endpoint
           -> KubernetesRequest req contentType res accept -- ^ req: Request Type, res: Response Type
 _mkRequest m u = KubernetesRequest m u _mkParams []
@@ -253,18 +258,18 @@ removeHeader req header =
 
 _setContentTypeHeader :: forall req contentType res accept. MimeType contentType => KubernetesRequest req contentType res accept -> KubernetesRequest req contentType res accept
 _setContentTypeHeader req =
-    case mimeType (P.Proxy :: P.Proxy contentType) of 
+    case mimeType (P.Proxy :: P.Proxy contentType) of
         Just m -> req `setHeader` [("content-type", BC.pack $ P.show m)]
         Nothing -> req `removeHeader` ["content-type"]
 
 _setAcceptHeader :: forall req contentType res accept. MimeType accept => KubernetesRequest req contentType res accept -> KubernetesRequest req contentType res accept
 _setAcceptHeader req =
-    case mimeType (P.Proxy :: P.Proxy accept) of 
+    case mimeType (P.Proxy :: P.Proxy accept) of
         Just m -> req `setHeader` [("accept", BC.pack $ P.show m)]
         Nothing -> req `removeHeader` ["accept"]
 
 setQuery :: KubernetesRequest req contentType res accept -> [NH.QueryItem] -> KubernetesRequest req contentType res accept
-setQuery req query = 
+setQuery req query =
   req &
   L.over
     (rParamsL . paramsQueryL)
@@ -273,25 +278,25 @@ setQuery req query =
     cifst = CI.mk . P.fst
 
 addForm :: KubernetesRequest req contentType res accept -> WH.Form -> KubernetesRequest req contentType res accept
-addForm req newform = 
+addForm req newform =
     let form = case paramsBody (rParams req) of
             ParamBodyFormUrlEncoded _form -> _form
             _ -> mempty
     in req & L.set (rParamsL . paramsBodyL) (ParamBodyFormUrlEncoded (newform <> form))
 
 _addMultiFormPart :: KubernetesRequest req contentType res accept -> NH.Part -> KubernetesRequest req contentType res accept
-_addMultiFormPart req newpart = 
+_addMultiFormPart req newpart =
     let parts = case paramsBody (rParams req) of
             ParamBodyMultipartFormData _parts -> _parts
             _ -> []
     in req & L.set (rParamsL . paramsBodyL) (ParamBodyMultipartFormData (newpart : parts))
 
 _setBodyBS :: KubernetesRequest req contentType res accept -> B.ByteString -> KubernetesRequest req contentType res accept
-_setBodyBS req body = 
+_setBodyBS req body =
     req & L.set (rParamsL . paramsBodyL) (ParamBodyB body)
 
 _setBodyLBS :: KubernetesRequest req contentType res accept -> BL.ByteString -> KubernetesRequest req contentType res accept
-_setBodyLBS req body = 
+_setBodyLBS req body =
     req & L.set (rParamsL . paramsBodyL) (ParamBodyBL body)
 
 _hasAuthType :: AuthMethod authMethod => KubernetesRequest req contentType res accept -> P.Proxy authMethod -> KubernetesRequest req contentType res accept
@@ -360,7 +365,7 @@ _toCollA' c encode one xs = case c of
     {-# INLINE go #-}
     {-# INLINE expandList #-}
     {-# INLINE combine #-}
-  
+
 -- * AuthMethods
 
 -- | Provides a method to apply auth methods to requests
@@ -391,7 +396,7 @@ _applyAuthMethods req config@(KubernetesClientConfig {configAuthMethods = as}) =
   foldlM go req as
   where
     go r (AnyAuthMethod a) = applyAuthMethod config a r
-  
+
 -- * Utils
 
 -- | Removes Null fields.  (OpenAPI-Specification 2.0 does not allow Null in JSON)
@@ -420,7 +425,10 @@ _memptyToNothing x = x
 -- * DateTime Formatting
 
 newtype DateTime = DateTime { unDateTime :: TI.UTCTime }
-  deriving (P.Eq,P.Data,P.Ord,P.Typeable,NF.NFData,TI.ParseTime,TI.FormatTime)
+  deriving (P.Eq,P.Data,P.Ord,P.Typeable,NF.NFData,TI.FormatTime)
+instance TI.ParseTime DateTime where
+  parseTimeSpecifier _ = TI.parseTimeSpecifier (P.Proxy :: P.Proxy TI.UTCTime)
+  buildTime l xs = DateTime <$> TI.buildTime l xs
 instance A.FromJSON DateTime where
   parseJSON = A.withText "DateTime" (_readDateTime . T.unpack)
 instance A.ToJSON DateTime where
@@ -435,7 +443,7 @@ instance MimeRender MimeMultipartFormData DateTime where
   mimeRender _ = mimeRenderDefaultMultipartFormData
 
 -- | @TI.parseTimeM True TI.defaultTimeLocale "%FT%T%QZ"@
-_readDateTime :: (TI.ParseTime t, Monad m) => String -> m t
+_readDateTime :: (TI.ParseTime t, Monad m, P.MonadFail m) => String -> m t
 _readDateTime =
   TI.parseTimeM True TI.defaultTimeLocale "%FT%T%QZ"
 {-# INLINE _readDateTime #-}
@@ -447,7 +455,7 @@ _showDateTime =
 {-# INLINE _showDateTime #-}
 
 -- | parse an ISO8601 date-time string
-_parseISO8601 :: (TI.ParseTime t, Monad m, Alternative m) => String -> m t
+_parseISO8601 :: (TI.ParseTime t, Monad m, Alternative m, P.MonadFail m) => String -> m t
 _parseISO8601 t =
   P.asum $
   P.flip (TI.parseTimeM True TI.defaultTimeLocale) t <$>
@@ -457,7 +465,10 @@ _parseISO8601 t =
 -- * Date Formatting
 
 newtype Date = Date { unDate :: TI.Day }
-  deriving (P.Enum,P.Eq,P.Data,P.Ord,P.Ix,NF.NFData,TI.ParseTime,TI.FormatTime)
+  deriving (P.Enum,P.Eq,P.Data,P.Ord,P.Ix,NF.NFData,TI.FormatTime)
+instance TI.ParseTime Date where
+  parseTimeSpecifier _ = TI.parseTimeSpecifier (P.Proxy :: P.Proxy TI.Day)
+  buildTime l xs = Date <$> TI.buildTime l xs
 instance A.FromJSON Date where
   parseJSON = A.withText "Date" (_readDate . T.unpack)
 instance A.ToJSON Date where
@@ -472,7 +483,7 @@ instance MimeRender MimeMultipartFormData Date where
   mimeRender _ = mimeRenderDefaultMultipartFormData
 
 -- | @TI.parseTimeM True TI.defaultTimeLocale "%Y-%m-%d"@
-_readDate :: (TI.ParseTime t, Monad m) => String -> m t
+_readDate :: (TI.ParseTime t, Monad m, P.MonadFail m) => String -> m t
 _readDate =
   TI.parseTimeM True TI.defaultTimeLocale "%Y-%m-%d"
 {-# INLINE _readDate #-}
@@ -485,7 +496,7 @@ _showDate =
 
 -- * Byte/Binary Formatting
 
-  
+
 -- | base64 encoded characters
 newtype ByteArray = ByteArray { unByteArray :: BL.ByteString }
   deriving (P.Eq,P.Data,P.Ord,P.Typeable,NF.NFData)
@@ -504,7 +515,7 @@ instance MimeRender MimeMultipartFormData ByteArray where
   mimeRender _ = mimeRenderDefaultMultipartFormData
 
 -- | read base64 encoded characters
-_readByteArray :: Monad m => Text -> m ByteArray
+_readByteArray :: (Monad m, P.MonadFail m) => Text -> m ByteArray
 _readByteArray = P.either P.fail (pure . ByteArray) . BL64.decode . BL.fromStrict . T.encodeUtf8
 {-# INLINE _readByteArray #-}
 
@@ -530,7 +541,7 @@ instance P.Show Binary where
 instance MimeRender MimeMultipartFormData Binary where
   mimeRender _ = unBinary
 
-_readBinaryBase64 :: Monad m => Text -> m Binary
+_readBinaryBase64 :: (Monad m, P.MonadFail m) => Text -> m Binary
 _readBinaryBase64 = P.either P.fail (pure . Binary) . BL64.decode . BL.fromStrict . T.encodeUtf8
 {-# INLINE _readBinaryBase64 #-}
 
