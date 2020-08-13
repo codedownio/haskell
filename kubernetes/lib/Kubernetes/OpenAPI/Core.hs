@@ -426,9 +426,6 @@ _memptyToNothing x = x
 
 newtype DateTime = DateTime { unDateTime :: TI.UTCTime }
   deriving (P.Eq,P.Data,P.Ord,P.Typeable,NF.NFData,TI.FormatTime)
-instance TI.ParseTime DateTime where
-  parseTimeSpecifier _ = TI.parseTimeSpecifier (P.Proxy :: P.Proxy TI.UTCTime)
-  buildTime l xs = DateTime <$> TI.buildTime l xs
 instance A.FromJSON DateTime where
   parseJSON = A.withText "DateTime" (_readDateTime . T.unpack)
 instance A.ToJSON DateTime where
@@ -443,9 +440,8 @@ instance MimeRender MimeMultipartFormData DateTime where
   mimeRender _ = mimeRenderDefaultMultipartFormData
 
 -- | @TI.parseTimeM True TI.defaultTimeLocale "%FT%T%QZ"@
-_readDateTime :: (TI.ParseTime t, Monad m, P.MonadFail m) => String -> m t
-_readDateTime =
-  TI.parseTimeM True TI.defaultTimeLocale "%FT%T%QZ"
+_readDateTime :: (Monad m, P.MonadFail m) => String -> m DateTime
+_readDateTime = (DateTime <$>) . TI.parseTimeM True TI.defaultTimeLocale "%FT%T%QZ"
 {-# INLINE _readDateTime #-}
 
 -- | @TI.formatTime TI.defaultTimeLocale "%FT%T%6QZ"@
